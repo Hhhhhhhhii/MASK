@@ -1,35 +1,101 @@
-name: Build Mobile Game APK
-on: [push, workflow_dispatch]
+
+name: Build MASK Android APK
+
+on:
+  workflow_dispatch:
+  push:
+    branches:
+      - main
+
 jobs:
-  export:
+  build:
     runs-on: ubuntu-latest
+
     steps:
+      # 1. Download project source
       - name: Checkout Source Files
         uses: actions/checkout@v5
 
+      # 2. Setup Java
       - name: Setup Java Environment
         uses: actions/setup-java@v5
         with:
           distribution: 'temurin'
           java-version: '17'
 
+      # 3. Setup Android SDK
       - name: Setup Android SDK
         uses: android-actions/setup-android@v4
 
+      # 4. Install Android SDK components
+      - name: Install Android SDK Components
+        run: |
+          sdkmanager "platform-tools"
+          sdkmanager "platforms;android-35"
+          sdkmanager "build-tools;35.0.0"
+          yes | sdkmanager --licenses
+
+      # 5. Fix loose script paths
       - name: Fix loose script paths
         run: |
           sed -i 's|res://scripts/|res://|g' main.tscn || true
           sed -i 's|res://scripts/|res://|g' *.gd || true
 
-            - name: Download Engine Binaries
+      # 6. Download Godot 4.3
+      - name: Download Godot Engine
         run: |
-          curl -L -o godot.zip https://github.com
-          unzip godot.zip
+          curl -fL -o godot.zip \
+            https://github.com/godotengine/godot/releases/download/4.3-stable/Godot_v4.3-stable_linux.x86_64.zip
+
+          unzip -q godot.zip
+
           mv Godot_v4.3-stable_linux.x86_64 godot
+
           chmod +x godot
-          
-          curl -L -o templates.tpz https://github.com
-          unzip templates.tpz
+
+      # 7. Download Android export templates
+      - name: Download Godot Export Templates
+        run: |
+          curl -fL -o templates.tpz \
+            https://github.com/godotengine/godot/releases/download/4.3-stable/Godot_v4.3-stable_export_templates.tpz
+
+          unzip -q templates.tpz
+
           mkdir -p ~/.local/share/godot/export_templates/4.3.stable
-          mv templates/* ~/.local/share/godot/export_templates/4.3.stable/
+
+          cp -a templates/. ~/.local/share/godot/export_templates/4.3.stable/
+
+      # 8. Import Godot project
+      - name: Import Godot Project
+        run: |
+          ./godot --headless --editor --path . --quit
+
+      # 9. Create APK output directory
+      - name: Prepare APK Output
+        run: |
+          mkdir -p build
+
+      # 10. Build Android APK
+      - name: Export MASK Android APK
+        run: |
+          ./godot --headless --path . \
+            --export-debug "Android" build/MASK.apk
+
+      # 11. Verify APK
+      - name: Verify APK
+        run: |
+          if [ ! -f build/MASK.apk ]; then
+            echo "APK BUILD FAILED"
+            exit 1
+          fi
+
+          ls -lh build/MASK.apk
+
+      # 12. Upload APK
+      - name: Upload MASK APK
+        uses: actions/upload-artifact@v4
+        with:
+          name: MASK-Android-APK
+          path: build/MASK.apk
+          if-no-files-found: error
           
