@@ -11,16 +11,20 @@ jobs:
   build:
     runs-on: ubuntu-latest
 
+    env:
+      HOME: ${{ github.workspace }}/.ci-home
+      XDG_CONFIG_HOME: ${{ github.workspace }}/.ci-home/.config
+
     steps:
       # 1. Download project source
       - name: Checkout Source Files
         uses: actions/checkout@v5
 
-      # 2. Setup Java
+      # 2. Setup Java 17
       - name: Setup Java Environment
         uses: actions/setup-java@v5
         with:
-          distribution: 'temurin'
+          distribution: temurin
           java-version: '17'
 
       # 3. Setup Android SDK
@@ -30,16 +34,23 @@ jobs:
       # 4. Install Android SDK components
       - name: Install Android SDK Components
         run: |
-          sdkmanager "platform-tools"
-          sdkmanager "platforms;android-35"
-          sdkmanager "build-tools;35.0.0"
           yes | sdkmanager --licenses
+          sdkmanager "platform-tools"
+          sdkmanager "platforms;android-34"
+          sdkmanager "build-tools;34.0.0"
 
-      # 5. Fix loose script paths
-      - name: Fix loose script paths
+      # 5. Prepare writable Godot directories
+      - name: Prepare Godot Environment
         run: |
-          sed -i 's|res://scripts/|res://|g' main.tscn || true
-          sed -i 's|res://scripts/|res://|g' *.gd || true
+          mkdir -p "$HOME/.config/godot"
+          mkdir -p "$HOME/.local/share/godot"
+          mkdir -p "$GITHUB_WORKSPACE/.godot/editor"
+
+          chmod -R u+rwX "$GITHUB_WORKSPACE"
+
+          rm -rf "$GITHUB_WORKSPACE/.godot"
+
+          mkdir -p "$GITHUB_WORKSPACE/.godot/editor"
 
       # 6. Download Godot 4.3
       - name: Download Godot Engine
@@ -61,41 +72,56 @@ jobs:
 
           unzip -q templates.tpz
 
-          mkdir -p ~/.local/share/godot/export_templates/4.3.stable
+          mkdir -p "$HOME/.local/share/godot/export_templates/4.3.stable"
 
-          cp -a templates/. ~/.local/share/godot/export_templates/4.3.stable/
+          cp -a templates/. "$HOME/.local/share/godot/export_templates/4.3.stable/"
 
-      # 8. Import Godot project
+      # 8. Import project using editor mode
       - name: Import Godot Project
         run: |
-          ./godot --headless --editor --path . --quit
+          ./godot --headless --editor \
+            --path "$GITHUB_WORKSPACE" \
+            --import
 
-      # 9. Create APK output directory
+      # 9. Verify project permissions
+      - name: Verify Godot Project
+        run: |
+          mkdir -p .godot/editor
+          chmod -R u+rwX .godot
+
+          test -w .godot/editor
+
+          echo "Godot project directory is writable."
+
+      # 10. Prepare APK output
       - name: Prepare APK Output
         run: |
           mkdir -p build
 
-      # 10. Build Android APK
+      # 11. Export Android APK in editor mode
       - name: Export MASK Android APK
         run: |
-          ./godot --headless --path . \
+          ./godot --headless --editor \
+            --path "$GITHUB_WORKSPACE" \
             --export-debug "Android" build/MASK.apk
 
-      # 11. Verify APK
+      # 12. Verify APK
       - name: Verify APK
         run: |
-          if [ ! -f build/MASK.apk ]; then
-            echo "APK BUILD FAILED"
+          if [ ! -s build/MASK.apk ]; then
+            echo "ERROR: APK was not created."
             exit 1
           fi
 
+          echo "APK BUILD SUCCESSFUL"
           ls -lh build/MASK.apk
 
-      # 12. Upload APK
+      # 13. Upload APK to GitHub
       - name: Upload MASK APK
         uses: actions/upload-artifact@v4
         with:
           name: MASK-Android-APK
           path: build/MASK.apk
           if-no-files-found: error
+          retention-days: 14
           
